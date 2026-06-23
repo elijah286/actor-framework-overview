@@ -50,6 +50,7 @@ TEXT_EXTS = {
 # The installer's own tooling directory is never rebranded: it must keep pointing
 # at the tooling SOURCE repo (catalog.source) so re-runs / upgrades still work.
 NO_SUBSTITUTION_PREFIX = ".github/labview-ci/"
+DEFAULT_EXCLUDED_STATUSES = {"planned", "experimental"}
 
 
 def log(msg: str = "") -> None:
@@ -146,6 +147,13 @@ def build_substitutions(catalog: dict, owner: str | None, name: str | None) -> l
         if find != replace:
             subs.append((find, replace))
     return subs
+
+
+def default_activities(catalog: dict) -> list[str]:
+    return [
+        c["id"] for c in catalog.get("capabilities", [])
+        if c.get("recommended") and c.get("status", "stable") not in DEFAULT_EXCLUDED_STATUSES
+    ]
 
 
 def resolve_file_list(catalog: dict, activities: list[str], os_list: list[str]) -> list[str]:
@@ -323,7 +331,7 @@ def print_next_steps(catalog: dict, owner: str | None, name: str | None, activit
 
 def thin_install(catalog: dict, target_root: Path, owner: str | None, name: str | None,
                  activities: list[str], os_list: list[str], labview_version: str,
-                 dry_run: bool) -> int:
+                 branch: str, dry_run: bool) -> int:
     """Write thin caller workflows + Dependabot + config that reference the source
     repo's reusable workflow/actions at the major tag, instead of vendoring copies.
     A thin consumer holds only these small files; updates arrive via the moving tag.
@@ -364,7 +372,7 @@ def thin_install(catalog: dict, target_root: Path, owner: str | None, name: str 
         "  pull_request:\n"
         "    paths: ['**.vi', '**.ctl', '**.lvproj', '**.lvlib', '**.lvclass']\n"
         "  push:\n"
-        "    branches: [main]\n"
+        f"    branches: [{branch}]\n"
         "    paths: ['**.vi', '**.ctl', '**.lvproj', '**.lvlib', '**.lvclass']\n"
         "  workflow_dispatch:\n\n"
         "jobs:\n"
@@ -408,7 +416,7 @@ def thin_install(catalog: dict, target_root: Path, owner: str | None, name: str 
             "  dashboard:\n"
             "    runs-on: ubuntu-latest\n"
             "    steps:\n"
-            "      - uses: actions/checkout@v4\n"
+            "      - uses: actions/checkout@v5\n"
             "      - name: Read opted-in tooling ref from config\n"
             "        id: cfg\n"
             "        shell: bash\n"
@@ -416,7 +424,7 @@ def thin_install(catalog: dict, target_root: Path, owner: str | None, name: str 
             "          REF=$(awk '/^[[:space:]]*ref:[[:space:]]/{print $2; exit}' .github/labview-ci.yml 2>/dev/null)\n"
             "          echo \"ref=${REF:-" + alias + "}\" >> \"$GITHUB_OUTPUT\"\n"
             "      - name: Check out tooling (opted-in version)\n"
-            "        uses: actions/checkout@v4\n"
+            "        uses: actions/checkout@v5\n"
             "        with:\n"
             f"          repository: {src_repo}\n"
             "          ref: ${{ steps.cfg.outputs.ref }}\n"
@@ -424,7 +432,7 @@ def thin_install(catalog: dict, target_root: Path, owner: str | None, name: str 
             "      - uses: ./_lvci/actions/dashboard\n"
             "        with:\n"
             "          github-token: ${{ secrets.GITHUB_TOKEN }}\n"
-            "      - uses: peaceiris/actions-gh-pages@v4\n"
+            "      - uses: peaceiris/actions-gh-pages@v4.1.0\n"
             "        with:\n"
             "          github_token: ${{ secrets.GITHUB_TOKEN }}\n"
             "          publish_dir: ci-out/dashboard\n"
@@ -549,7 +557,7 @@ def consumer_dashboard_workflow(catalog: dict, branch: str = "main") -> str:
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
         "      - name: Checkout repository\n"
-        "        uses: actions/checkout@v4\n"
+        "        uses: actions/checkout@v5\n"
         "      - name: Read opted-in tooling ref from config\n"
         "        id: cfg\n"
         "        shell: bash\n"
@@ -557,7 +565,7 @@ def consumer_dashboard_workflow(catalog: dict, branch: str = "main") -> str:
         "          REF=$(awk '/^[[:space:]]*ref:[[:space:]]/{print $2; exit}' .github/labview-ci.yml 2>/dev/null)\n"
         '          echo "ref=${REF:-' + ref + '}" >> "$GITHUB_OUTPUT"\n'
         "      - name: Check out tooling (opted-in version)\n"
-        "        uses: actions/checkout@v4\n"
+        "        uses: actions/checkout@v5\n"
         "        with:\n"
         "          repository: " + src_repo + "\n"
         "          ref: ${{ steps.cfg.outputs.ref }}\n"
@@ -567,7 +575,7 @@ def consumer_dashboard_workflow(catalog: dict, branch: str = "main") -> str:
         "        with:\n"
         "          github-token: ${{ secrets.GITHUB_TOKEN }}\n"
         "      - name: Deploy dashboard to GitHub Pages\n"
-        "        uses: peaceiris/actions-gh-pages@v4\n"
+        "        uses: peaceiris/actions-gh-pages@v4.1.0\n"
         "        with:\n"
         "          github_token: ${{ secrets.GITHUB_TOKEN }}\n"
         "          publish_dir: ci-out/dashboard\n"
@@ -637,9 +645,7 @@ def main() -> int:
             "target. Run a normal install first.")
     prev = manifest or {}
 
-    activities = parse_csv(args.activities) or prev.get("activities") or [
-        c["id"] for c in catalog.get("capabilities", []) if c.get("recommended")
-    ]
+    activities = parse_csv(args.activities) or prev.get("activities") or default_activities(catalog)
     os_list = parse_csv(args.os) or prev.get("os") or list(defaults.get("os", ["windows"]))
     valid_os = {"windows", "linux"}
     bad_os = [o for o in os_list if o not in valid_os]
@@ -659,6 +665,11 @@ def main() -> int:
 
     owner, name = detect_target_repo(target_root, args.repo)
     subs = build_substitutions(catalog, owner, name)
+    # Vendored workflows carry a static `branches: [main]` push-trigger filter that
+    # YAML can't express as the default branch; rewrite it to the target repo's
+    # actual default branch so push-to-default CI fires on non-"main" repos.
+    if branch and branch != "main":
+        subs.append(("branches: [main]", f"branches: [{branch}]"))
     if not subs:
         warn("target repo owner/name unknown - cosmetic branding left as-is "
              "(functional wiring still adapts at runtime). Pass --repo owner/name to rebrand.")
@@ -676,7 +687,7 @@ def main() -> int:
 
     if args.thin:
         return thin_install(catalog, target_root, owner, name, activities, os_list,
-                            labview_version, args.dry_run)
+                            labview_version, branch, args.dry_run)
 
     file_list = resolve_file_list(catalog, activities, os_list)
     stats = {"installed": 0, "updated": 0, "skipped": 0, "planned": 0, "preserved": 0}

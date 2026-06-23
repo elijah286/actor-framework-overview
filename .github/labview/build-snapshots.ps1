@@ -58,12 +58,17 @@ param(
     [int]   $MaxCommits        = 0,
     [int]   $MaxVIs            = 0,
     [int]   $TimeBudgetMinutes = 300,
+    [string]$Force             = 'false',
     # Directory holding render-snapshots.ps1 + build-gallery.py. Defaults to the
     # in-repo location; a composite action passes its own bundled directory so the
     # consumer repo needs no copy of these scripts.
     [string]$OpsDir            = '',
     # Directory holding the VI Browser page assets (vi-browser.html, vi-interactive.html).
-    [string]$PagesDir          = ''
+    [string]$PagesDir          = '',
+    # VI Browser 2.0 (position-aware frames JSON) emission: 'true' (default) emits
+    # the frames JSON next to each HTML when the PrintToImagesJson op is present;
+    # 'false' renders HTML only (VI Browser config: positionAware excludes Windows).
+    [string]$EmitFramesJson    = 'true'
 )
 
 # NOTE: 'Continue' (not 'Stop') is deliberate. This orchestrator drives native
@@ -75,6 +80,7 @@ param(
 # explicitly via $LASTEXITCODE (or an explicit `throw`), so 'Continue' is safe.
 $ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'SilentlyContinue'
+$ForceRender = $Force -match '^(?i:true|1|yes|on)$'
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 $WorkspaceRoot = (Resolve-Path $WorkspaceRoot).Path
@@ -126,6 +132,7 @@ foreach ($dir in @($ExistingByBlobDir, $ByBlobDir)) {
     }
 }
 Write-Host "Seeded $($Rendered.Count) already-rendered blob(s)."
+Write-Host "Force render: $ForceRender"
 
 # ── Determine commit list ────────────────────────────────────────────────────
 if ($Mode -eq 'head') {
@@ -169,7 +176,7 @@ $processed = 0
 try {
     foreach ($sha in $Commits) {
         $vimap    = Get-VimapForSha $sha
-        $worklist = @($vimap | Where-Object { -not $Rendered.Contains($_.Blob) })
+        $worklist = if ($ForceRender) { @($vimap) } else { @($vimap | Where-Object { -not $Rendered.Contains($_.Blob) }) }
 
         # Smoke-test cap: limit how many NEW VIs to render (0 = no limit). Lets a
         # validation run exercise the full pipeline quickly without rendering all VIs.
@@ -204,7 +211,8 @@ try {
                     -WorkspaceRoot "C:\wt\$sha" `
                     -OpsDir        'C:\ops' `
                     -OutByBlobDir  'C:\out\by-blob' `
-                    -WorkListPath  "C:\out\worklist-$sha.tsv"
+                    -WorkListPath  "C:\out\worklist-$sha.tsv" `
+                    -EmitFramesJson $EmitFramesJson
                 if ($LASTEXITCODE -ne 0) { Write-Warning "render exec returned $LASTEXITCODE for $sha (continuing)." }
                 foreach ($e in $worklist) { [void]$Rendered.Add($e.Blob) }
                 $totalRendered += $worklist.Count
@@ -247,6 +255,28 @@ Copy-Item (Join-Path $PagesDir 'vi-interactive.html') (Join-Path $OutDir 'vi-int
 # Tolerate its absence so older page bundles without it still deploy cleanly.
 $ViRenderSrc = Join-Path $PagesDir 'vi-render.js'
 if (Test-Path $ViRenderSrc) { Copy-Item $ViRenderSrc (Join-Path $OutDir 'vi-render.js') -Force }
+
+# -- Emit a flat index of every rendered blob (content-addressed) -------------
+# The dashboard reads this single file to know which of each revision's VIs have
+# a snapshot (snapshots are keyed by git blob SHA), so the Snapshots column and
+# the per-revision glyph reflect the real gallery without crawling by-blob/. The
+# set is every blob that now has a by-blob HTML (already-deployed seed + rendered
+# this run); it deploys alongside commits.json under vi-snapshots/.
+$BlobsIndex = Join-Path $OutDir 'blobs.json'
+try {
+    $sortedBlobs = @($Rendered) | Sort-Object
+    if ($sortedBlobs.Count -eq 0) {
+        $blobsJson = '[]'
+    } else {
+        # Build the array literal by hand: ConvertTo-Json renders a single-element
+        # set as a bare string, not a JSON array. Blob SHAs are hex - no escaping.
+        $blobsJson = '[' + (($sortedBlobs | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']'
+    }
+    [System.IO.File]::WriteAllText($BlobsIndex, $blobsJson, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Wrote blobs.json with $($sortedBlobs.Count) rendered blob(s)."
+} catch {
+    Write-Warning "Could not write blobs.json: $_"
+}
 
 Write-Host ""
 Write-Host "=== Snapshots done: $processed commit(s) processed, $totalRendered VI(s) rendered this run ==="
