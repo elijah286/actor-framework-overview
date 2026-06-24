@@ -1,8 +1,15 @@
 {
   "schema": 1,
   "repo": "elijah286/actor-framework-overview",
-  "sha": "b707e2eb9c50ff0b61a5afff7baa5002f84caa6c",
+  "sha": "be7ab2b1305ea8cd5f250e983b7619ad21588dfa",
   "revisions": [
+    {
+      "sha": "be7ab2b1305ea8cd5f250e983b7619ad21588dfa",
+      "short": "be7ab2b",
+      "message": "Add LabVIEW CI pipeline",
+      "author": "Elijah Kerry",
+      "date": "2026-06-24T15:44:28Z"
+    },
     {
       "sha": "b707e2eb9c50ff0b61a5afff7baa5002f84caa6c",
       "short": "b707e2e",
@@ -134,40 +141,7 @@
     "install_set": [],
     "conflicts": []
   },
-  "system": [
-    {
-      "name": "VI Browser 2.0 toimages runner",
-      "source": "Repository Go code",
-      "path": ".github/labview/toimages/main.go",
-      "details": "Batch runner compiled from repo Go source; Linux uses the toimages GHCR image and Windows builds runner.exe in the workflow.",
-      "platforms": {
-        "windows": {
-          "present": false,
-          "label": ""
-        },
-        "linux": {
-          "present": true,
-          "label": "toimages image"
-        }
-      }
-    },
-    {
-      "name": "lvctl render engine",
-      "source": "Repository Go code + embedded VIs",
-      "path": ".github/labview/toimages/_ni/labview/lvctl",
-      "details": "Renderer used by VI Browser 2.0 to drive LabVIEW and emit position-aware frame JSON.",
-      "platforms": {
-        "windows": {
-          "present": false,
-          "label": ""
-        },
-        "linux": {
-          "present": true,
-          "label": "toimages image"
-        }
-      }
-    }
-  ],
+  "system": [],
   "columns": [
     {
       "key": "windows",
