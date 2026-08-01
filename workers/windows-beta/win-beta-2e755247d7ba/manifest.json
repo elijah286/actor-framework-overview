@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "platform": "windows-beta",
+  "version": "win-beta-2e755247d7ba",
+  "labview_version": "2026",
+  "base_image": "ghcr.io/elijah286/labview-ci-with-containers-labview-base:windows-beta-2026",
+  "base_digest": "sha256:748f24232fcc806dab7eb0485d7b89aada97d25b5185a86fb4343d896a33abf4",
+  "seed_image": "ghcr.io/elijah286/labview-ci-with-containers-labview-base:windows-beta-2026",
+  "seed_digest": "sha256:748f24232fcc806dab7eb0485d7b89aada97d25b5185a86fb4343d896a33abf4",
+  "worker_layer": "seed-only-copy",
+  "copied_from_base": true,
+  "image_ref": "ghcr.io/elijah286/actor-framework-overview-labview:win-beta-2e755247d7ba",
+  "build_date": "2026-08-01T06:56:07Z",
+  "git_sha": "be7ab2b1305ea8cd5f250e983b7619ad21588dfa",
+  "run_url": "https://github.com/elijah286/actor-framework-overview/actions/runs/30688691510",
+  "vipc": [],
+  "nipkg_raw": "",
+  "nipkg_packages": []
+}
